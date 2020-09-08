@@ -570,7 +570,9 @@ end
 
       # Parse the node tree and build adoc
       index = 0
-      recursive_group tree, tree[nil][:child_id], index
+      if !tree.nil?
+        recursive_group tree, tree[nil][:child_id], index
+      end
 
       # Print the rest of the document
 
