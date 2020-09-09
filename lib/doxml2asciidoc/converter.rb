@@ -486,7 +486,7 @@ end
            
           @str += "\n"
             tree[node][:functions].each do |func|
-              single_function func, index
+              single_function func, index+1
             end
           end
           @str += "\n"
