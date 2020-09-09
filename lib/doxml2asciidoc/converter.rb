@@ -424,11 +424,35 @@ class Converter
   def parse_sectiondef_group section
     groups = []
     hsh = {}
-    hsh[:children] = []
+    hsh[:children]  = []
+    hsh[:functions] = []
+    hsh[:typedefs]  = []
+    hsh[:enums]     = []
+    hsh[:vars]      = []
     hsh[:name] = ""
     hsh[:name] = section.xpath("./compoundname").text
 
-    ret = parse_sectiondef_func section.xpath("./sectiondef")
+    section.xpath("./sectiondef").each do |section|
+      verbose "Parsing sectiondef kind " + section['kind']
+      case section['kind']
+      when 'define'
+        parse_sectiondef_define section
+      when 'func'
+        ret = parse_sectiondef_func section
+        hsh[:functions].concat ret[:functions]
+      when 'typedef'
+        ret = parse_sectiondef_typedef(section)
+        hsh[:typedefs].concat(ret)
+      when 'enum'
+        ret = parse_sectiondef_enum(section)
+        hsh[:enums].concat(ret)
+      when 'var'
+        ret = parse_sectiondef_var(section)
+        hsh[:vars].concat(ret)
+      else
+        raise "Unhandled section kind " + section['kind']
+      end
+    end
 
     if !section.xpath("./innergroup").nil?
       section.xpath("./innergroup").each do |innergroup|
@@ -438,9 +462,6 @@ class Converter
       hsh[:children] = nil
     end
 
-    if ret[:functions].length > 0
-      hsh[:functions] = ret[:functions]
-    end
     groups.push hsh
 
     groups
