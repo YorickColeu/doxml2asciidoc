@@ -574,18 +574,7 @@ end
         recursive_group tree, tree[nil][:child_id], index
       end
 
-      # Print the rest of the document
-
-      output_enums
-
-      @str += "== Functions\n"
-      @str += "\n"
-
-      @files.each do |hsh|
-        hsh[:functions].each do |func|
-          single_function func
-        end
-      end
+      # End of document
       @str += "\n"
     end
 
