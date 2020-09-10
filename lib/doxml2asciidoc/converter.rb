@@ -426,6 +426,7 @@ class Converter
     hsh = {}
     hsh[:children]  = []
     hsh[:functions] = []
+    hsh[:pages]     = []
     hsh[:typedefs]  = []
     hsh[:enums]     = []
     hsh[:vars]      = []
@@ -440,6 +441,9 @@ class Converter
       when 'func'
         ret = parse_sectiondef_func section
         hsh[:functions].concat ret[:functions]
+      when 'page'
+        ret = parse_sectiondef_page section
+        hsh[:pages].concat ret[:pages]
       when 'typedef'
         ret = parse_sectiondef_typedef(section)
         hsh[:typedefs].concat(ret)
@@ -502,12 +506,23 @@ end
         index += 1
         node_list.each do |node|
           @str += "="  + "="*index + " " + tree[node][:name] + "\n"
-          if !tree[node][:functions].nil?
-          @str += "==" + "="*index + " Functions\n"
-           
-          @str += "\n"
+          if !tree[node][:pages].empty?
+            tree[node][:pages].each do |page|
+              single_page page
+            end
+          end
+          if !tree[node][:functions].empty?
+            @str += "==" + "="*index + " Functions\n"
+            @str += "\n"
             tree[node][:functions].each do |func|
               single_function func, index+1
+            end
+          end
+          if !tree[node][:enums].empty?
+            @str += "==" + "="*index + " Enums\n"
+            @str += "\n"
+            tree[node][:enums].each do |enum|
+              single_enum enum, index+1
             end
           end
           @str += "\n"
@@ -526,17 +541,35 @@ end
 
       #output_typedefs
 
+      # Print README
+      @files.each do |hsh|
+        if hsh.has_key? :pages and hsh[:name].eql?("md_README")
+          hsh[:pages].each do |page|
+            single_page page
+          end
+        end
+      end
 
-      output_page
-
-      # Create a group list with indexes
+      # Create a group list
       group_list = []
       i = 0
       @files.each do |hsh|
         if !hsh[:groups].nil?
           hsh[:groups].each do |group|
+            # Add indexes
             group[:id] = i
             i += 1
+            @files.each do |hsh|
+              if hsh.has_key? :pages
+                hsh[:pages].each do |page|
+                  # Potential regex that can help parsing the group ID
+                  # (_{2,}(*SKIP)(*F)|_)
+                  # ([_])\1
+                  # $stderr.puts "Group ID: " + hsh[:id][7..-1].index(Regexp.new re, true).to_s
+                  # single_page page
+                end
+              end
+            end
             group_list.push group
           end
         end
@@ -581,11 +614,14 @@ end
         siblings.push(node[:id])
       end
 
-      # Add to tree the group names and their functions
+      # Add to tree the group names and their components
       tree.each do |group|
         if !group[0].nil?
           group[1][:name]      = group_list.find {|x| x[:id] == group[0]}[:name]
+          group[1][:pages]     = group_list.find {|x| x[:id] == group[0]}[:pages]
           group[1][:functions] = group_list.find {|x| x[:id] == group[0]}[:functions]
+          group[1][:enums]     = group_list.find {|x| x[:id] == group[0]}[:enums]
+          group[1][:typedefs]  = group_list.find {|x| x[:id] == group[0]}[:typedefs]
         end
       end
 
@@ -629,24 +665,6 @@ end
       @str += "\n"
     end
 
-    def output_page
-      pages = []
-      @files.each do |hsh|
-        if hsh.has_key? :pages
-          hsh[:pages].each do |page|
-            pages << page
-          end
-        end
-      end
-
-      if pages.length > 0
-        pages.each do |page|
-          single_page page
-        end
-        @str += "\n"
-      end
-    end
-
     def single_page page
       page[:section].each do |section|
         if section[:type] == :code
@@ -683,8 +701,8 @@ end
       @str += "#{typedef[:type]} -> #{typedef[:name]}:: #{typedef[:doc]}\n"
     end
 
-    def single_enum enum
-      @str += "=== #{enum[:name]}\n"
+    def single_enum enum, index=1
+      @str += "=="  + "="*index + " " + "#{enum[:name]}\n"
       @str += "\n"
       @str += enum[:doc] if enum[:doc]
       @str += "\n"
