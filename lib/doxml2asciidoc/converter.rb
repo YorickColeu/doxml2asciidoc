@@ -559,18 +559,21 @@ end
             # Add indexes
             group[:id] = i
             i += 1
-            @files.each do |hsh|
-              if hsh.has_key? :pages
-                hsh[:pages].each do |page|
-                  # Potential regex that can help parsing the group ID
-                  # (_{2,}(*SKIP)(*F)|_)
-                  # ([_])\1
-                  # $stderr.puts "Group ID: " + hsh[:id][7..-1].index(Regexp.new re, true).to_s
-                  # single_page page
-                end
-              end
-            end
             group_list.push group
+          end
+        end
+      end
+
+      @files.each do |hsh|
+        if hsh.has_key? :pages
+          hsh[:pages].each do |page|
+            # The following code parse the page ID name to extract groupname
+            intermediate_str = hsh[:id][7..-1][/^([a-zA-Z0-9]+([_]{2,}[[a-zA-Z0-9]]*)+)/,1].to_s
+            groupname = intermediate_str.gsub("__", "_")
+            pagename  = hsh[:id][7..-1].gsub(intermediate_str+"_", "")
+            if group_list.find {|x| x[:name].casecmp(groupname) == 0}
+              group_list.find {|x| x[:name].casecmp(groupname) == 0}[:pages].push page
+            end
           end
         end
       end
@@ -665,7 +668,7 @@ end
       @str += "\n"
     end
 
-    def single_page page
+    def single_page page, index=1
       page[:section].each do |section|
         if section[:type] == :code
           if section[:value].include? "[ditaa]"
@@ -676,7 +679,7 @@ end
             @str += "----\n"
           end
         elsif section[:type] == :title
-          header_index = "="
+          header_index = "=" + "="*index
           for i in 0..section[:index]
             header_index += '='
           end
