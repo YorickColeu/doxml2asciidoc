@@ -739,7 +739,18 @@ end
       @str += "| Parameters\n"
       @str += "|\n"
       func[:params].each do |param|
-        @str += "#{parameter_direction_string param}`#{param[:type]} #{param[:declname]}`::\n"
+        if param[:type].is_a? String
+          type = "#{param[:type]}"
+        else
+          type = "#{param[:type].text}"
+        end
+
+        if param[:declname].is_a? String
+          declname = ""
+        else
+          declname = " #{param[:declname].text}"
+        end
+        @str += "#{parameter_direction_string param}`#{type}#{declname}`::\n"
         @str += "#{param[:description]}\n"
       end
       @str += "\n"
