@@ -327,10 +327,15 @@ class Converter
 
                     # Find the associated entry in the param list
                     hsh[:params].each do |param|
-                      if param[:declname].eql? name.text
-                        # Do the remainder of the mappings
-                        param[:direction] = parameteritem.at('./parameternamelist/parametername')['direction']
-                        param[:description] = parameteritem.at('./parameterdescription/para').text
+                      $stderr.puts 'param[:declname].class.name: ' + param[:declname].class.name
+                      # param[:declname].class.name
+
+                      if param[:declname].class.name.eql?  "Nokogiri::XML::Element"
+                        if param[:declname].text.to_s.strip.eql? name.text.to_s.strip
+                          # Do the remainder of the mappings
+                          param[:direction] = parameteritem.at('./parameternamelist/parametername')['direction']
+                          param[:description] = parameteritem.at('./parameterdescription/para').text
+                        end
                       end
                     end
                   end
