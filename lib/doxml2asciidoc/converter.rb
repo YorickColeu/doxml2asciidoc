@@ -41,6 +41,8 @@ class Converter
     converter.parse(xmldoc.root)
   end
 
+  # The xml file has been converted to Nokogiri XML Document
+  # Different processing occurs depending on copound kind
   def parse root
     @root = root
     hsh =  nil
@@ -57,6 +59,10 @@ class Converter
         hsh = parse_doxygenfile_page @root
       when 'group'
         hsh = parse_doxygenfile_group @root
+      when 'struct'
+        hsh = parse_doxygenfile_struct @root
+      when 'union'
+        hsh = parse_doxygenfile_union @root
       else
         raise "Unknown/unhandled compound_def " + compound_def['kind']
       end
@@ -93,6 +99,11 @@ class Converter
         h = Converter.parse_file filepath
         hsh[:files] << h
       when 'struct'
+        h = Converter.parse_file filepath
+        hsh[:files] << h
+      when 'union'
+        h = Converter.parse_file filepath
+        hsh[:files] << h
       when 'dir'
         # Silently ignore this compound - we dont care about it.
       else
@@ -176,6 +187,64 @@ class Converter
     
     ret = parse_sectiondef_group(compound)
     hsh[:groups].concat(ret)
+
+    hsh
+  end
+
+  def parse_doxygenfile_struct root
+    compound = root.at_xpath '//compounddef'
+
+    hsh = {:name => compound.element_children.at_xpath('//compoundname').text,
+           :id => compound['id'],
+           :language => compound['language'],
+           :structs => []
+          }
+
+    compound.xpath('./sectiondef').each do |section|
+      verbose "Parsing sectiondef kind " + section['kind']
+      case section['kind']
+      when 'public-attrib'
+        ret = parse_sectiondef_union_or_struct(section)
+        ret[:name] = compound.element_children.at_xpath('//compoundname').text
+        ret[:type] = "struct"
+        ret[:briefdescription] = compound.xpath('./briefdescription').text
+        ret_array = []
+        ret_array.push ret
+
+        hsh[:structs].concat(ret_array)
+      else
+        raise "Unhandled section kind " + section['kind']
+      end
+    end
+    
+    hsh
+  end
+
+  def parse_doxygenfile_union root
+    compound = root.at_xpath '//compounddef'
+
+    hsh = {:name => compound.element_children.at_xpath('//compoundname').text,
+           :id => compound['id'],
+           :language => compound['language'],
+           :unions => []
+          }
+
+    compound.xpath('./sectiondef').each do |section|
+      verbose "Parsing sectiondef kind " + section['kind']
+      case section['kind']
+      when 'public-attrib'
+        ret = parse_sectiondef_union_or_struct(section)
+        ret[:name] = compound.element_children.at_xpath('//compoundname').text
+        ret[:type] = "union"
+        ret[:briefdescription] = compound.xpath('./briefdescription').text
+        ret_array = []
+        ret_array.push ret
+
+        hsh[:unions].concat(ret_array)
+      else
+        raise "Unhandled section kind " + section['kind']
+      end
+    end
 
     hsh
   end
@@ -327,9 +396,6 @@ class Converter
 
                     # Find the associated entry in the param list
                     hsh[:params].each do |param|
-                      $stderr.puts 'param[:declname].class.name: ' + param[:declname].class.name
-                      # param[:declname].class.name
-
                       if param[:declname].class.name.eql?  "Nokogiri::XML::Element"
                         if param[:declname].text.to_s.strip.eql? name.text.to_s.strip
                           # Do the remainder of the mappings
@@ -429,14 +495,21 @@ class Converter
   def parse_sectiondef_group section
     groups = []
     hsh = {}
-    hsh[:children]  = []
-    hsh[:functions] = []
-    hsh[:pages]     = []
-    hsh[:typedefs]  = []
-    hsh[:enums]     = []
-    hsh[:vars]      = []
+    hsh[:children]       = []
+    hsh[:functions]      = []
+    hsh[:pages]          = []
+    hsh[:typedefs]       = []
+    hsh[:enums]          = []
+    hsh[:structs]        = []
+    hsh[:innerclasses]   = []
+    hsh[:vars]           = []
     hsh[:name] = ""
-    hsh[:name] = section.xpath("./compoundname").text
+    hsh[:name] = section.xpath("./title").text
+
+    section.xpath("./innerclass").each do |innerclass|
+      verbose "Parsing sectiondef prot: " + innerclass['prot'].to_s
+      hsh[:innerclasses].push :refid => innerclass['refid']
+    end
 
     section.xpath("./sectiondef").each do |section|
       verbose "Parsing sectiondef kind " + section['kind']
@@ -455,6 +528,9 @@ class Converter
       when 'enum'
         ret = parse_sectiondef_enum(section)
         hsh[:enums].concat(ret)
+      when 'struct'
+        ret = parse_sectiondef_struct(section)
+        hsh[:structs].concat(ret)
       when 'var'
         ret = parse_sectiondef_var(section)
         hsh[:vars].concat(ret)
@@ -476,6 +552,28 @@ class Converter
     groups
   end
 
+  # Parse xml structures: Get list of groups with their children
+  def parse_sectiondef_union_or_struct section
+    union_or_struct = []
+    hsh = {}
+    hsh[:variables] = []
+    section.xpath('./memberdef').each do |member|
+      case member['kind']
+      when 'variable'
+        variable = {}
+        variable[:type]                = member.at_xpath('./type').text
+        variable[:argsstring]          = member.at_xpath('./argsstring').text
+        variable[:name]                = member.at_xpath('./name').text
+        variable[:briefdescription]    = member.at_xpath('./briefdescription').text
+        variable[:detaileddescription] = member.at_xpath('./detaileddescription').text
+        variable[:inbodydescription]   = member.at_xpath('./inbodydescription').text
+
+        hsh[:variables].push variable
+      end
+    end
+    hsh
+  end
+  
   def parse_codeline element, line
     if element.text?
       line += element.text
@@ -506,7 +604,7 @@ end
       end
     end
 
-    def recursive_group tree, node_list, index
+    def recursive_group tree, node_list, index, union_list, struct_list
       if !node_list.nil?
         index += 1
         node_list.each do |node|
@@ -530,10 +628,89 @@ end
               single_enum enum, index+1
             end
           end
+          if !tree[node][:structs].empty?
+            @str += "==" + "="*index + " Structs\n"
+            tree[node][:structs].each do |struct|
+              @str += "\n"
+              @str += "===" + "="*index + " #{struct[:name]}\n"
+              @str += "\n"
+              @str += "[cols='h,5a']\n"
+              @str += "|===\n"
+              @str += "| Description\n"
+              @str += "| #{struct[:briefdescription]}\n"
+              @str += "\n"
+
+              @str += "| Signature \n"
+              @str += "|\n"
+              @str += "[source,C]\n"
+              @str += "----\n"
+              recursive_struct_or_union struct, 0, union_list, struct_list
+              @str += "----\n"
+              @str += "|===\n"
+              
+              @str += "\n"
+            end
+          end
           @str += "\n"
-          recursive_group tree, tree[node][:child_id], index
+          recursive_group tree, tree[node][:child_id], index, union_list, struct_list
         end
       end
+    end
+
+    def recursive_struct_or_union struct_or_union, index, union_list, struct_list, variable_name=nil
+      ret = {}
+
+      if struct_or_union[:type].eql? "union"
+        # This component is a union
+        @str += "   "*index + "union\n"
+        @str += "   "*index + "{\n"
+      elsif struct_or_union[:type].eql? "struct"
+        # This component is a structure
+        @str += "   "*index + "struct "
+        if !struct_or_union[:name].include? ".__unnamed__."
+          @str += "#{struct_or_union[:name]}"
+        end
+        @str += "\n"
+        @str += "   "*index + "{\n"
+      end
+      # Go through components
+      struct_or_union[:variables].each do |variable|
+        # If this is a struct or enum: recursive_struct_or_union -> 
+        if variable[:type].include? "union "
+          # Find it on union_list          
+          recursive_struct_or_union union_list.find {|x| x[:name].include? variable[:type].gsub("union ", "").split('::')[0]}, index+1, union_list, struct_list
+        elsif variable[:type].include? "struct "
+          # Find it on struct_list
+          struct_list.select {|x| x[:name].include? variable[:type].gsub("struct ", "").split('::')[0]+"."}.each do |struct|
+            if struct[:name].split('.')[-1].to_s.eql? variable[:name].to_s
+              recursive_struct_or_union struct, index+1, union_list, struct_list, variable[:name]
+            end
+          end
+        else
+          # If this is variable or enum: simply print its info
+          if !variable[:detaileddescription].strip.empty?
+            @str += "   "*(index+1) + "/** #{variable[:name]}#{variable[:detaileddescription]}\n"
+            @str += "   "*(index+1) + "*/\n"
+          end
+          @str += "   "*(index+1) + "#{variable[:type]} #{variable[:name]}"
+          if !variable[:argsstring].empty?
+            @str += "#{variable[:argsstring]}"
+          end
+          @str += ";\n"
+        end
+      end
+      @str += "   "*index + "}"
+      if struct_or_union[:type].eql? "union"
+        if !struct_or_union[:name].include? ".__unnamed__"
+          @str += "   "*(index+1) + "#{struct_or_union[:name]}"
+        end
+      elsif struct_or_union[:type].eql? "struct"
+        if !variable_name.nil?
+          @str += "#{variable_name}"
+        end
+      end
+      @str += ";"
+      @str += "\n"
     end
 
     def generate
@@ -548,9 +725,11 @@ end
 
       # Print README
       @files.each do |hsh|
-        if hsh.has_key? :pages and hsh[:name].eql?("md_README")
-          hsh[:pages].each do |page|
-            single_page page
+        if !hsh.nil?
+          if hsh.has_key? :pages and hsh[:name].eql?("md_README")
+            hsh[:pages].each do |page|
+              single_page page
+            end
           end
         end
       end
@@ -559,25 +738,86 @@ end
       group_list = []
       i = 0
       @files.each do |hsh|
-        if !hsh[:groups].nil?
-          hsh[:groups].each do |group|
-            # Add indexes
-            group[:id] = i
-            i += 1
-            group_list.push group
+        if !hsh.nil?
+          if !hsh[:groups].nil?
+            hsh[:groups].each do |group|
+              # Add indexes
+              group[:id] = i
+              i += 1
+              group_list.push group
+            end
           end
         end
       end
 
+      # Create a struct list
+      struct_list = []
       @files.each do |hsh|
-        if hsh.has_key? :pages
-          hsh[:pages].each do |page|
-            # The following code parse the page ID name to extract groupname
-            intermediate_str = hsh[:id][7..-1][/^([a-zA-Z0-9]+([_]{2,}[[a-zA-Z0-9]]*)+)/,1].to_s
-            groupname = intermediate_str.gsub("__", "_")
-            pagename  = hsh[:id][7..-1].gsub(intermediate_str+"_", "")
-            if group_list.find {|x| x[:name].casecmp(groupname) == 0}
-              group_list.find {|x| x[:name].casecmp(groupname) == 0}[:pages].push page
+        if !hsh.nil?
+          if !hsh[:structs].nil?
+            hsh[:structs].each do |struct|
+              struct_list.push struct
+            end
+          end
+        end
+      end
+
+      # Create a union list
+      union_list = []
+      i = 0
+      @files.each do |hsh|
+        if !hsh.nil?
+          if !hsh[:unions].nil?
+            hsh[:unions].each do |union|
+              union_list.push union
+            end
+          end
+        end
+      end
+
+      # The following list helps knowing if structs has already been mapped to groups
+      list_filled_structs = []
+      @files.each do |hsh|
+        if !hsh.nil?
+          if hsh.has_key? :pages
+            hsh[:pages].each do |page|
+              # The following code parse the page ID name to extract groupname
+              intermediate_str = hsh[:id][7..-1][/^([a-zA-Z0-9]+([_]{2,}[[a-zA-Z0-9]]*)+)/,1].to_s
+              groupname = intermediate_str.gsub("__", "_")
+              pagename  = hsh[:id][7..-1].gsub(intermediate_str+"_", "")
+              if group_list.find {|x| x[:name].casecmp(groupname) == 0}
+                group_list.find {|x| x[:name].casecmp(groupname) == 0}[:pages].push page
+              end
+            end
+          end
+          if hsh.has_key? :structs
+            hsh[:structs].each do |struct|
+              group_list.each do |group|
+                # If current group isn't refered in list_filled_structs: Add it
+                if !list_filled_structs.find {|x| x[:groupname].eql? group[:name]}
+                  list_filled_structs.push :groupname => group[:name], :structlist => []
+                end
+                if !group[:innerclasses].empty?
+                  group[:innerclasses].each do |innerclass|
+                    if innerclass[:refid].start_with?('struct')
+                      # Parse it to get the struct name
+                      intermediate_str = innerclass[:refid][6..-1][/^([a-zA-Z0-9]+([_]{2,}[[a-zA-Z0-9]]*)+)/,1].to_s
+                      structname = intermediate_str.gsub("__", "_")
+                      if group_list.find {|x| x[:name].casecmp(group[:name]) == 0}
+                        # Check if we already added this struct to the group
+                        if !list_filled_structs.find {|x| x[:groupname].eql? group[:name]}[:structlist].find {|x| x.eql? struct_list.find {|x| x[:name].casecmp(structname) == 0}[:name]}
+                          group_list.find {|x| x[:name].casecmp(group[:name]) == 0}[:structs].push struct_list.find {|x| x[:name].casecmp(structname) == 0}
+                          list_filled_structs.find {|x| x[:groupname].eql? group[:name]}[:structlist].push struct_list.find {|x| x[:name].casecmp(structname) == 0}[:name]
+                        end
+                      end
+                    end
+                  end
+                  if group[:innerclasses].find {|x| x[:refid].casecmp(struct[:id]) == 0}
+                    group[:structs].push struct
+                  end
+                else
+                end
+              end
             end
           end
         end
@@ -610,7 +850,7 @@ end
         if node[:parent_id].nil?
           node[:parent_id] = nil
         end
-      end      
+      end
 
       # Set a node tree
       tree = {}
@@ -629,6 +869,8 @@ end
           group[1][:pages]     = group_list.find {|x| x[:id] == group[0]}[:pages]
           group[1][:functions] = group_list.find {|x| x[:id] == group[0]}[:functions]
           group[1][:enums]     = group_list.find {|x| x[:id] == group[0]}[:enums]
+          group[1][:structs]   = group_list.find {|x| x[:id] == group[0]}[:structs]
+          group[1][:unions]    = group_list.find {|x| x[:id] == group[0]}[:unions]
           group[1][:typedefs]  = group_list.find {|x| x[:id] == group[0]}[:typedefs]
         end
       end
@@ -636,7 +878,7 @@ end
       # Parse the node tree and build adoc
       index = 0
       if !tree.empty?
-        recursive_group tree, tree[nil][:child_id], index
+        recursive_group tree, tree[nil][:child_id], index, union_list, struct_list
       end
 
       # End of document
@@ -737,7 +979,7 @@ end
       @str += "|\n"
       @str += "[source,C]\n"
       @str += "----\n"
-      @str += "#{func[:definition]} #{func[:argsstring]}\n"
+      @str += "#{func[:definition]} #{func[:argsstring]}\n\n"
       @str += "----\n"
       @str += "\n"
 
